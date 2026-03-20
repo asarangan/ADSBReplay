@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">ADSBReplay</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="OpenGPX">Open GPX File</string>
+</resources>
