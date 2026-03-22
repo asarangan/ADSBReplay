@@ -80,7 +80,7 @@ class MainActivity : AppCompatActivity() {
         //This is the listener for the button that launches the file selector
         val gpxReadFileButton: Button = findViewById<Button>(R.id.buttonFileOpen)
         gpxReadFileButton.setOnClickListener {
-            if (Data.mockGPSServiceIsRunning){
+            if (Data.GDL90ReplayServiceIsRunning){
                 Data.stopService = true
             }
             gpxFilePicker.launch("*/*")
@@ -171,9 +171,9 @@ class MainActivity : AppCompatActivity() {
             }
         }.start()
 
-        //If the mockGPS is not already running, and there is valid data, launch the foreground service.
+        //If the GDL90ReplayService is not already running, and there is valid data, launch the foreground service.
         //If we open a second GPX file while one is already running, we don't want to launch a second service thread.
-        if ((!Data.mockGPSServiceIsRunning)&&(Data.numOfPoints > 1)) {
+        if ((!Data.GDL90ReplayServiceIsRunning)&&(Data.numOfPoints > 1)) {
             Data.stopService = false
             val intentService = Intent(baseContext, GDL90ReplayService::class.java)
             Log.d(TAG,"Run - Starting Foreground Service")

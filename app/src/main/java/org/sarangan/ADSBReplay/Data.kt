@@ -12,7 +12,7 @@ object Data {
     var serviceStartTime: Long = 0
     var trackStartTime:Long = 0
 
-    var mockGPSServiceIsRunning = false
+    var GDL90ReplayServiceIsRunning = false
 
     var stopService = false
 

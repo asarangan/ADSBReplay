@@ -52,7 +52,7 @@ class GDL90ReplayService : Service() {
 
             try {
                 var pt = Data.currentPoint
-                Data.mockGPSServiceIsRunning = true   // keep your existing flag for now
+                Data.GDL90ReplayServiceIsRunning = true   // keep existing flag for now
 
                 while (pt < Data.numOfPoints - 1) {
                     if (Data.seekBarMoved) {
@@ -106,7 +106,7 @@ class GDL90ReplayService : Service() {
 
                     val now = System.currentTimeMillis()
 
-                    // Same timing correction logic you already had.
+                    // Same timing correction logic we already had.
                     val correction = (now - Data.serviceStartTime) -
                             (Data.trackPoints[pt].epoch - Data.trackStartTime)
 
@@ -127,7 +127,7 @@ class GDL90ReplayService : Service() {
                 }
             } finally {
                 socket.close()
-                Data.mockGPSServiceIsRunning = false
+                Data.GDL90ReplayServiceIsRunning = false
                 stopSelf()
             }
         }.start()
