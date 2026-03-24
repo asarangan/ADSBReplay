@@ -1,7 +1,9 @@
 package org.sarangan.ADSBReplay
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.AttributeSet
 import android.util.Log
@@ -11,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import android.net.Uri
+import android.os.Build
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
@@ -24,13 +27,30 @@ import kotlin.Int
 const val TAG:String = "GPS"
 
 
+
+
 class MainActivity : AppCompatActivity() {
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Log.d(TAG, "POST_NOTIFICATIONS granted = $granted")
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         Log.d(TAG,"MainActivity onCreate - start")
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.layout)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         //This is for reading the external file, and passing the Uri to the callback object (which is defined here within {}
         val gpxFilePicker = registerForActivityResult(ActivityResultContracts.GetContent())

@@ -8,7 +8,6 @@
         android:minSdkVersion="24"
         android:targetSdkVersion="36" />
 
-    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -38,6 +37,9 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse" >
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Replays GPX flight tracks and transmits GDL-90 ownship data over UDP loopback to a local EFB app." />
         </service>
 
         <activity

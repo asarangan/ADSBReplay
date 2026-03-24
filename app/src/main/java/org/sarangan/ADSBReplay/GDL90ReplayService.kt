@@ -14,6 +14,8 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import kotlin.math.roundToInt
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 
 class GDL90ReplayService : Service() {
 
@@ -44,7 +46,12 @@ class GDL90ReplayService : Service() {
             "GDL90 Replay is Running",
             applicationContext
         )
-        startForeground(1, notification)
+        ServiceCompat.startForeground(
+            this,
+            1,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        )
 
         Thread {
             val loopback = InetAddress.getByName("127.0.0.1")
