@@ -192,6 +192,8 @@ object GDL90 {
     }
 
     private fun encodeHorizontalVelocity(knots: Float): Int {
+        if (!knots.isFinite()) return 0
+
         val v = knots.roundToInt()
         return when {
             v < 0 -> 0
@@ -208,6 +210,8 @@ object GDL90 {
     }
 
     private fun encodeTrack(trackDeg: Float): Int {
+        if (!trackDeg.isFinite()) return 0
+
         var t = trackDeg
         while (t < 0f) t += 360f
         while (t >= 360f) t -= 360f

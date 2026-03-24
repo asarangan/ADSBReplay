@@ -148,18 +148,26 @@ class XmlPullParserHandler {
     //This calculation is being done before loading the current track point into the array.
     //The speed (in m/s) is returned from the function
     private fun speed(trackPoint: Data.TrackPoint): Float {
+        val prev = Data.trackPoints[Data.trackPoints.size - 1]
+
         val time2 = trackPoint.epoch
-        val time1 = Data.trackPoints[Data.trackPoints.size - 1].epoch
-        //Longitude of the current track point
-        val lon2: Double = trackPoint.lon.toRad()
-        //Longitude of the last track point in the array
-        val lon1: Double = Data.trackPoints[Data.trackPoints.size - 1].lon.toRad()
-        val lat2: Double = trackPoint.lat.toRad()
-        val lat1: Double = Data.trackPoints[Data.trackPoints.size - 1].lat.toRad()
-        return (
-                (acos(sin(lat1)*sin(lat2)+cos(lat1)*cos(lat2)*cos(lon1-lon2))
-                        /((time2-time1).toDouble()*1.0e-3)
-                        ).toFloat().toM()
-                )
+        val time1 = prev.epoch
+        val dtSec = (time2 - time1).toDouble() * 1.0e-3
+
+        if (dtSec <= 0.0) return 0.0F
+
+        val lon2 = trackPoint.lon.toRad()
+        val lon1 = prev.lon.toRad()
+        val lat2 = trackPoint.lat.toRad()
+        val lat1 = prev.lat.toRad()
+        val arg = sin(lat1) * sin(lat2) + cos(lat1) * cos(lat2) * cos(lon1 - lon2)
+
+        // Clamp to valid acos domain to avoid NaN from floating-point roundoff.
+        val clampedArg = arg.coerceIn(-1.0, 1.0)
+        val centralAngle = acos(clampedArg)
+        if (!centralAngle.isFinite()) return 0.0F
+        val speedMps = (centralAngle / dtSec).toFloat().toM()
+
+        return if (speedMps.isFinite() && speedMps >= 0.0F) speedMps else 0.0F
     }
 }
