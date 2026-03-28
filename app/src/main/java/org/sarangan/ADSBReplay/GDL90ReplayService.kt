@@ -1,4 +1,5 @@
 package org.sarangan.ADSBReplay
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,17 +11,16 @@ import android.os.Binder
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import kotlin.math.roundToInt
-import androidx.core.app.ServiceCompat
-import android.content.pm.ServiceInfo
 
 class GDL90ReplayService : Service() {
 
     inner class MyServiceBinder : Binder()
-
     private val myBinder = MyServiceBinder()
 
     override fun onBind(intent: Intent?): IBinder {
@@ -46,6 +46,7 @@ class GDL90ReplayService : Service() {
             "GDL90 Replay is Running",
             applicationContext
         )
+
         ServiceCompat.startForeground(
             this,
             1,
@@ -59,7 +60,7 @@ class GDL90ReplayService : Service() {
 
             try {
                 var pt = Data.currentPoint
-                Data.GDL90ReplayServiceIsRunning = true   // keep existing flag for now
+                Data.GDL90ReplayServiceIsRunning = true
 
                 while (pt < Data.numOfPoints - 1) {
                     if (Data.seekBarMoved) {
@@ -111,20 +112,24 @@ class GDL90ReplayService : Service() {
                         )
                     )
 
-                    val now = System.currentTimeMillis()
+                    // Send all traffic packets saved in this GPX point.
+                    for (trafficPacket in current.trafficPackets) {
+                        Log.d(TAG, "Sending traffic packet of ${trafficPacket.size} bytes")
+                        sendPacket(socket, loopback, GDL90.UDP_PORT, trafficPacket)
+                    }
 
-                    // Same timing correction logic we already had.
+                    val now = System.currentTimeMillis()
                     val correction = (now - Data.serviceStartTime) -
                             (Data.trackPoints[pt].epoch - Data.trackStartTime)
 
-                    var sleepTime = (Data.trackPoints[pt + 1].epoch - Data.trackPoints[pt].epoch) - correction
+                    var sleepTime =
+                        (Data.trackPoints[pt + 1].epoch - Data.trackPoints[pt].epoch) - correction
                     if (sleepTime < 0L) sleepTime = 0L
 
                     Log.d(
                         TAG,
-                        "GDL90 Replay: pt=$pt sleep=$sleepTime correction=$correction " +
-                                "lat=${current.lat} lon=${current.lon} altM=${current.altitude} " +
-                                "spdMps=${current.speed} crs=${current.trueCourse} vsFpm=$vsFpm"
+                        "Replay pt=$pt traffic=${current.trafficPackets.size} " +
+                                "sleep=$sleepTime lat=${current.lat} lon=${current.lon}"
                     )
 
                     Thread.sleep(sleepTime)
@@ -152,10 +157,6 @@ class GDL90ReplayService : Service() {
         socket.send(packet)
     }
 
-    /**
-     * Estimate vertical speed using adjacent points.
-     * Output is in feet per minute.
-     */
     private fun computeVerticalSpeedFpm(
         prev: Data.TrackPoint,
         current: Data.TrackPoint,
@@ -202,7 +203,6 @@ class TrackPlayServiceNotification {
         builder.setContentText("GDL90 replay is running")
         builder.setSmallIcon(R.drawable.ic_launcher_foreground)
         builder.priority = NotificationCompat.PRIORITY_HIGH
-
         return builder.build()
     }
 }
