@@ -112,10 +112,18 @@ class GDL90ReplayService : Service() {
                         )
                     )
 
-                    // Send all traffic packets saved in this GPX point.
                     for (trafficPacket in current.trafficPackets) {
-                        Log.d(TAG, "Sending traffic packet of ${trafficPacket.size} bytes")
                         sendPacket(socket, loopback, GDL90.UDP_PORT, trafficPacket)
+                    }
+
+                    // send any uplink packets saved for this time
+                    for (uplinkPacket in current.uplinkPackets) {
+                        sendPacket(
+                            socket,
+                            loopback,
+                            GDL90.UDP_PORT,
+                            uplinkPacket
+                        )
                     }
 
                     val now = System.currentTimeMillis()

@@ -24,6 +24,7 @@ object Data {
         var trueCourse: Float = 0.0F
 
         val trafficPackets: MutableList<ByteArray> = mutableListOf()
+        val uplinkPackets: MutableList<ByteArray> = mutableListOf()
     }
 }
 
@@ -40,11 +41,11 @@ fun Float.toMph(): Float {
 }
 
 fun Double.toRad(): Double {
-    return (this / 180.0 * PI)
+    return this / 180.0 * PI
 }
 
 fun Double.toDeg(): Double {
-    return (this / PI * 180.0)
+    return this / PI * 180.0
 }
 
 fun Float.toFt(): Double {

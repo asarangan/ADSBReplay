@@ -28,77 +28,115 @@ class XmlPullParserHandler {
             val parser: XmlPullParser = factory.newPullParser()
             parser.setInput(inputStream, null)
 
-            var eventType: Int = parser.next()
-            var text: String = ""
-            var trackPoint = Data.TrackPoint()
-
             Data.trackPoints.clear()
 
+            var eventType = parser.eventType
+            var text = ""
+
+            var currentTrackPoint: Data.TrackPoint? = null
+
+            // Detached ADS-B event state
+            var currentEventTime: Long? = null
+            var currentEventType: String? = null
+            var currentPacketHex: String? = null
+
             while (eventType != XmlPullParser.END_DOCUMENT) {
-                val tagName: String? = parser.name
+                val tagName = parser.name ?: ""
 
-                if (eventType == XmlPullParser.START_TAG &&
-                    tagName.equals("trkpt", ignoreCase = true)
-                ) {
-                    trackPoint = Data.TrackPoint()
-                    trackPoint.lat = parser.getAttributeValue(null, "lat").toDouble()
-                    trackPoint.lon = parser.getAttributeValue(null, "lon").toDouble()
-                }
+                when (eventType) {
+                    XmlPullParser.START_TAG -> {
+                        when {
+                            tagName.equals("trkpt", ignoreCase = true) -> {
+                                currentTrackPoint = Data.TrackPoint()
+                                currentTrackPoint.lat =
+                                    parser.getAttributeValue(null, "lat")?.toDoubleOrNull() ?: 0.0
+                                currentTrackPoint.lon =
+                                    parser.getAttributeValue(null, "lon")?.toDoubleOrNull() ?: 0.0
+                            }
 
-                if (eventType == XmlPullParser.TEXT) {
-                    text = parser.text ?: ""
-                }
-
-                if (eventType == XmlPullParser.END_TAG) {
-                    when {
-                        tagName.equals("ele", ignoreCase = true) -> {
-                            trackPoint.altitude = text.toFloatOrNull() ?: 0.0F
+                            tagName.equals("adsb:event", ignoreCase = true) ||
+                                    tagName.equals("event", ignoreCase = true) -> {
+                                currentEventTime = parseTime(
+                                    parser.getAttributeValue(null, "time"),
+                                    simpleDateFormats
+                                )
+                                currentEventType = parser.getAttributeValue(null, "type")
+                                currentPacketHex = null
+                            }
                         }
+                    }
 
-                        tagName.equals("speed", ignoreCase = true) -> {
-                            trackPoint.speed = text.toFloatOrNull() ?: 0.0F
-                        }
+                    XmlPullParser.TEXT -> {
+                        text = parser.text ?: ""
+                    }
 
-                        tagName.equals("time", ignoreCase = true) -> {
-                            for (fmt in simpleDateFormats) {
-                                try {
-                                    val parsed = fmt.parse(text)
-                                    if (parsed != null) {
-                                        trackPoint.epoch = parsed.time
-                                        break
+                    XmlPullParser.END_TAG -> {
+                        when {
+                            tagName.equals("time", ignoreCase = true) -> {
+                                if (currentTrackPoint != null) {
+                                    currentTrackPoint.epoch = parseTime(text, simpleDateFormats) ?: 0L
+                                }
+                            }
+
+                            tagName.equals("ele", ignoreCase = true) -> {
+                                if (currentTrackPoint != null) {
+                                    currentTrackPoint.altitude = text.toFloatOrNull() ?: 0.0F
+                                }
+                            }
+
+                            tagName.equals("speed", ignoreCase = true) -> {
+                                if (currentTrackPoint != null) {
+                                    currentTrackPoint.speed = text.toFloatOrNull() ?: 0.0F
+                                }
+                            }
+
+                            tagName.equals("trkpt", ignoreCase = true) -> {
+                                val tp = currentTrackPoint
+                                if (tp != null) {
+                                    tp.trueCourse = if (Data.trackPoints.isNotEmpty()) {
+                                        trueCourse(tp)
+                                    } else {
+                                        0.0F
                                     }
-                                } catch (_: ParseException) {
+
+                                    if (!speedExists) {
+                                        tp.speed = if (Data.trackPoints.isNotEmpty()) {
+                                            speed(tp)
+                                        } else {
+                                            0.0F
+                                        }
+                                    }
+
+                                    Data.trackPoints.add(tp)
                                 }
+                                currentTrackPoint = null
                             }
-                        }
 
-                        // Handle ADS-B traffic packets stored inside GPX extensions.
-                        // Match both "adsb:packet" and local-name-only "packet".
-                        tagName.equals("adsb:packet", ignoreCase = true) ||
-                                tagName.equals("packet", ignoreCase = true) -> {
-                            val packet = decodeHexPacket(text)
-                            if (packet != null) {
-                                trackPoint.trafficPackets.add(packet)
+                            tagName.equals("adsb:packet", ignoreCase = true) ||
+                                    tagName.equals("packet", ignoreCase = true) -> {
+                                currentPacketHex = text.trim()
                             }
-                        }
 
-                        tagName.equals("trkpt", ignoreCase = true) -> {
-                            val trueCourse = if (Data.trackPoints.isNotEmpty()) {
-                                trueCourse(trackPoint)
-                            } else {
-                                0.0F
-                            }
-                            trackPoint.trueCourse = trueCourse
+                            tagName.equals("adsb:event", ignoreCase = true) ||
+                                    tagName.equals("event", ignoreCase = true) -> {
+                                val packet = decodeHexPacket(currentPacketHex)
+                                val eventTime = currentEventTime
+                                val eventTypeValue = currentEventType?.lowercase()
 
-                            if (!speedExists) {
-                                trackPoint.speed = if (Data.trackPoints.isNotEmpty()) {
-                                    speed(trackPoint)
-                                } else {
-                                    0.0F
+                                if (packet != null && eventTime != null) {
+                                    val tp = findTrackPointByEpoch(eventTime)
+                                    if (tp != null) {
+                                        when (eventTypeValue) {
+                                            "traffic" -> tp.trafficPackets.add(packet)
+                                            "uplink" -> tp.uplinkPackets.add(packet)
+                                        }
+                                    }
                                 }
-                            }
 
-                            Data.trackPoints.add(trackPoint)
+                                currentEventTime = null
+                                currentEventType = null
+                                currentPacketHex = null
+                            }
                         }
                     }
                 }
@@ -114,7 +152,31 @@ class XmlPullParserHandler {
         }
     }
 
-    private fun decodeHexPacket(raw: String): ByteArray? {
+    private fun parseTime(
+        raw: String?,
+        formats: List<SimpleDateFormat>
+    ): Long? {
+        if (raw == null) return null
+        for (fmt in formats) {
+            try {
+                val d = fmt.parse(raw)
+                if (d != null) return d.time
+            } catch (_: ParseException) {
+            }
+        }
+        return null
+    }
+
+    private fun findTrackPointByEpoch(epoch: Long): Data.TrackPoint? {
+        // Exact match is expected for your saved format.
+        for (tp in Data.trackPoints) {
+            if (tp.epoch == epoch) return tp
+        }
+        return null
+    }
+
+    private fun decodeHexPacket(raw: String?): ByteArray? {
+        if (raw == null) return null
         val hex = raw.trim().replace("\\s+".toRegex(), "")
         if (hex.isEmpty() || hex.length % 2 != 0) return null
 
