@@ -28,14 +28,13 @@ class XmlPullParserHandler {
             val parser: XmlPullParser = factory.newPullParser()
             parser.setInput(inputStream, null)
 
-            Data.trackPoints.clear()
+            Data.clearAll()
 
             var eventType = parser.eventType
             var text = ""
 
             var currentTrackPoint: Data.TrackPoint? = null
 
-            // Detached ADS-B event state
             var currentEventTime: Long? = null
             var currentEventType: String? = null
             var currentPacketHex: String? = null
@@ -47,11 +46,10 @@ class XmlPullParserHandler {
                     XmlPullParser.START_TAG -> {
                         when {
                             tagName.equals("trkpt", ignoreCase = true) -> {
-                                currentTrackPoint = Data.TrackPoint()
-                                currentTrackPoint.lat =
-                                    parser.getAttributeValue(null, "lat")?.toDoubleOrNull() ?: 0.0
-                                currentTrackPoint.lon =
-                                    parser.getAttributeValue(null, "lon")?.toDoubleOrNull() ?: 0.0
+                                currentTrackPoint = Data.TrackPoint().apply {
+                                    lat = parser.getAttributeValue(null, "lat")?.toDoubleOrNull() ?: 0.0
+                                    lon = parser.getAttributeValue(null, "lon")?.toDoubleOrNull() ?: 0.0
+                                }
                             }
 
                             tagName.equals("adsb:event", ignoreCase = true) ||
@@ -60,7 +58,7 @@ class XmlPullParserHandler {
                                     parser.getAttributeValue(null, "time"),
                                     simpleDateFormats
                                 )
-                                currentEventType = parser.getAttributeValue(null, "type")
+                                currentEventType = parser.getAttributeValue(null, "type")?.trim()?.lowercase()
                                 currentPacketHex = null
                             }
                         }
@@ -91,24 +89,7 @@ class XmlPullParserHandler {
                             }
 
                             tagName.equals("trkpt", ignoreCase = true) -> {
-                                val tp = currentTrackPoint
-                                if (tp != null) {
-                                    tp.trueCourse = if (Data.trackPoints.isNotEmpty()) {
-                                        trueCourse(tp)
-                                    } else {
-                                        0.0F
-                                    }
-
-                                    if (!speedExists) {
-                                        tp.speed = if (Data.trackPoints.isNotEmpty()) {
-                                            speed(tp)
-                                        } else {
-                                            0.0F
-                                        }
-                                    }
-
-                                    Data.trackPoints.add(tp)
-                                }
+                                currentTrackPoint?.let { Data.trackPoints.add(it) }
                                 currentTrackPoint = null
                             }
 
@@ -121,15 +102,33 @@ class XmlPullParserHandler {
                                     tagName.equals("event", ignoreCase = true) -> {
                                 val packet = decodeHexPacket(currentPacketHex)
                                 val eventTime = currentEventTime
-                                val eventTypeValue = currentEventType?.lowercase()
+                                val eventTypeValue = currentEventType
 
                                 if (packet != null && eventTime != null) {
-                                    val tp = findTrackPointByEpoch(eventTime)
-                                    if (tp != null) {
-                                        when (eventTypeValue) {
-                                            "traffic" -> tp.trafficPackets.add(packet)
-                                            "uplink" -> tp.uplinkPackets.add(packet)
-                                        }
+                                    when (eventTypeValue) {
+                                        "traffic" -> Data.timedPackets.add(
+                                            Data.TimedPacket(
+                                                epoch = eventTime,
+                                                type = Data.TYPE_TRAFFIC,
+                                                bytes = packet
+                                            )
+                                        )
+
+                                        "uplink" -> Data.timedPackets.add(
+                                            Data.TimedPacket(
+                                                epoch = eventTime,
+                                                type = Data.TYPE_UPLINK,
+                                                bytes = packet
+                                            )
+                                        )
+
+                                        "ownship_geo_altitude" -> Data.timedPackets.add(
+                                            Data.TimedPacket(
+                                                epoch = eventTime,
+                                                type = Data.TYPE_OWNSHIP_GEO_ALT,
+                                                bytes = packet
+                                            )
+                                        )
                                     }
                                 }
 
@@ -143,12 +142,37 @@ class XmlPullParserHandler {
 
                 eventType = parser.next()
             }
+
+            finalizeTrackPoints(speedExists)
+            Data.numOfPoints = Data.trackPoints.size
+            Data.buildReplayTimeline()
+
         } catch (e: XmlPullParserException) {
             e.printStackTrace()
             returnCode = 1
         } catch (e: IOException) {
             e.printStackTrace()
             returnCode = 2
+        }
+    }
+
+    private fun finalizeTrackPoints(speedExists: Boolean) {
+        for (i in Data.trackPoints.indices) {
+            val tp = Data.trackPoints[i]
+
+            tp.trueCourse = if (i > 0) {
+                trueCourse(Data.trackPoints[i - 1], tp)
+            } else {
+                0.0F
+            }
+
+            if (!speedExists) {
+                tp.speed = if (i > 0) {
+                    speed(Data.trackPoints[i - 1], tp)
+                } else {
+                    0.0F
+                }
+            }
         }
     }
 
@@ -167,14 +191,6 @@ class XmlPullParserHandler {
         return null
     }
 
-    private fun findTrackPointByEpoch(epoch: Long): Data.TrackPoint? {
-        // Exact match is expected for your saved format.
-        for (tp in Data.trackPoints) {
-            if (tp.epoch == epoch) return tp
-        }
-        return null
-    }
-
     private fun decodeHexPacket(raw: String?): ByteArray? {
         if (raw == null) return null
         val hex = raw.trim().replace("\\s+".toRegex(), "")
@@ -189,11 +205,10 @@ class XmlPullParserHandler {
         }
     }
 
-    private fun trueCourse(trackPoint: Data.TrackPoint): Float {
-        val prev = Data.trackPoints[Data.trackPoints.size - 1]
-        val lon2 = trackPoint.lon.toRad()
+    private fun trueCourse(prev: Data.TrackPoint, current: Data.TrackPoint): Float {
+        val lon2 = current.lon.toRad()
         val lon1 = prev.lon.toRad()
-        val lat2 = trackPoint.lat.toRad()
+        val lat2 = current.lat.toRad()
         val lat1 = prev.lat.toRad()
 
         return ((atan2(
@@ -202,30 +217,23 @@ class XmlPullParserHandler {
         ) + 2.0 * PI) % (2.0 * PI)).toDeg().toFloat()
     }
 
-    private fun speed(trackPoint: Data.TrackPoint): Float {
-        val prev = Data.trackPoints[Data.trackPoints.size - 1]
-
-        val dtSec = (trackPoint.epoch - prev.epoch).toDouble() / 1000.0
+    private fun speed(prev: Data.TrackPoint, current: Data.TrackPoint): Float {
+        val dtSec = (current.epoch - prev.epoch).toDouble() / 1000.0
         if (dtSec <= 0.0) return 0.0F
 
         val lat1 = prev.lat.toRad()
         val lon1 = prev.lon.toRad()
-        val lat2 = trackPoint.lat.toRad()
-        val lon2 = trackPoint.lon.toRad()
+        val lat2 = current.lat.toRad()
+        val lon2 = current.lon.toRad()
 
         val dLat = lat2 - lat1
         val dLon = lon2 - lon1
 
         val a = sin(dLat / 2.0).pow(2.0) +
                 cos(lat1) * cos(lat2) * sin(dLon / 2.0).pow(2.0)
+        val c = 2.0 * atan2(sqrt(a), sqrt(1.0 - a))
+        val distanceMeters = 6371000.0 * c
 
-        val clampedA = a.coerceIn(0.0, 1.0)
-        val c = 2.0 * atan2(sqrt(clampedA), sqrt(1.0 - clampedA))
-
-        val earthRadiusM = 6371000.0
-        val distanceM = earthRadiusM * c
-        val speedMps = distanceM / dtSec
-
-        return if (speedMps.isFinite()) speedMps.toFloat() else 0.0F
+        return (distanceMeters / dtSec).toFloat()
     }
 }

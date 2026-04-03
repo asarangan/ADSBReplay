@@ -7,16 +7,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Context.NOTIFICATION_SERVICE
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import android.content.pm.ServiceInfo
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import kotlin.math.roundToInt
 
 class GDL90ReplayService : Service() {
 
@@ -59,91 +59,52 @@ class GDL90ReplayService : Service() {
             val socket = DatagramSocket()
 
             try {
-                var pt = Data.currentPoint
+                if (Data.replayEvents.isEmpty()) {
+                    Log.w(TAG, "No replay events available")
+                    stopSelf()
+                    return@Thread
+                }
+
                 Data.GDL90ReplayServiceIsRunning = true
 
-                while (pt < Data.numOfPoints - 1) {
+                var eventIndex = getStartEventIndexFromCurrentPoint()
+                var replayBaseElapsed = SystemClock.elapsedRealtime() -
+                        Data.replayEvents[eventIndex].relativeTimeMs
+
+                while (eventIndex < Data.replayEvents.size) {
+                    if (Data.stopService) break
+
                     if (Data.seekBarMoved) {
-                        pt = Data.seekBarPoint
+                        val seekPoint = Data.seekBarPoint.coerceIn(0, (Data.numOfPoints - 1).coerceAtLeast(0))
+                        Data.currentPoint = seekPoint
+                        eventIndex = getEventIndexForTrackPoint(seekPoint)
                         Data.seekBarMoved = false
-                        Data.trackStartTime = Data.trackPoints[pt].epoch
-                        Data.serviceStartTime = System.currentTimeMillis()
+                        replayBaseElapsed = SystemClock.elapsedRealtime() -
+                                Data.replayEvents[eventIndex].relativeTimeMs
                     }
 
-                    Data.currentPoint = pt
+                    val event = Data.replayEvents[eventIndex]
+                    waitUntilTargetTime(event.relativeTimeMs, replayBaseElapsed)
 
-                    val current = Data.trackPoints[pt]
-                    val next = if (pt + 1 < Data.numOfPoints) Data.trackPoints[pt + 1] else current
-                    val prev = if (pt > 0) Data.trackPoints[pt - 1] else current
+                    if (Data.stopService) break
 
-                    val vsFpm = computeVerticalSpeedFpm(prev, current, next)
+                    sendPacket(socket, loopback, GDL90.UDP_PORT, event.bytes)
 
-                    sendPacket(
-                        socket,
-                        loopback,
-                        GDL90.UDP_PORT,
-                        GDL90.heartbeatPacket(System.currentTimeMillis())
-                    )
-
-                    sendPacket(
-                        socket,
-                        loopback,
-                        GDL90.UDP_PORT,
-                        GDL90.ownshipPacket(
-                            latDeg = current.lat,
-                            lonDeg = current.lon,
-                            altitudeMeters = current.altitude,
-                            speedMps = current.speed,
-                            trueCourseDeg = current.trueCourse,
-                            verticalSpeedFpm = vsFpm,
-                            callsign = "N12345",
-                            participantAddress = 0xABCDEF
-                        )
-                    )
-
-                    sendPacket(
-                        socket,
-                        loopback,
-                        GDL90.UDP_PORT,
-                        GDL90.ownshipGeoAltitudePacket(
-                            altitudeMeters = current.altitude,
-                            vfomMeters = 10,
-                            verticalWarning = false
-                        )
-                    )
-
-                    for (trafficPacket in current.trafficPackets) {
-                        sendPacket(socket, loopback, GDL90.UDP_PORT, trafficPacket)
+                    if (event.type == Data.TYPE_OWNSHIP) {
+                        event.sourceTrackPointIndex?.let { idx ->
+                            Data.currentPoint = idx
+                            Data.trackStartTime = Data.trackPoints[idx].epoch
+                            Data.serviceStartTime = System.currentTimeMillis()
+                        }
                     }
-
-                    // send any uplink packets saved for this time
-                    for (uplinkPacket in current.uplinkPackets) {
-                        sendPacket(
-                            socket,
-                            loopback,
-                            GDL90.UDP_PORT,
-                            uplinkPacket
-                        )
-                    }
-
-                    val now = System.currentTimeMillis()
-                    val correction = (now - Data.serviceStartTime) -
-                            (Data.trackPoints[pt].epoch - Data.trackStartTime)
-
-                    var sleepTime =
-                        (Data.trackPoints[pt + 1].epoch - Data.trackPoints[pt].epoch) - correction
-                    if (sleepTime < 0L) sleepTime = 0L
 
                     Log.d(
                         TAG,
-                        "Replay pt=$pt traffic=${current.trafficPackets.size} " +
-                                "sleep=$sleepTime lat=${current.lat} lon=${current.lon}"
+                        "Replay eventIndex=$eventIndex type=${event.type} " +
+                                "t=${event.relativeTimeMs} currentPoint=${Data.currentPoint}"
                     )
 
-                    Thread.sleep(sleepTime)
-                    pt++
-
-                    if (Data.stopService) break
+                    eventIndex++
                 }
             } finally {
                 socket.close()
@@ -155,6 +116,40 @@ class GDL90ReplayService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun getStartEventIndexFromCurrentPoint(): Int {
+        return if (Data.currentPoint in Data.trackPointToReplayEventIndex.indices) {
+            Data.trackPointToReplayEventIndex[Data.currentPoint]
+        } else {
+            0
+        }
+    }
+
+    private fun getEventIndexForTrackPoint(trackPointIndex: Int): Int {
+        return if (trackPointIndex in Data.trackPointToReplayEventIndex.indices) {
+            Data.trackPointToReplayEventIndex[trackPointIndex]
+        } else {
+            0
+        }
+    }
+
+    private fun waitUntilTargetTime(
+        relativeTimeMs: Long,
+        replayBaseElapsed: Long
+    ) {
+        while (true) {
+            if (Data.stopService || Data.seekBarMoved) return
+
+            val now = SystemClock.elapsedRealtime()
+            val target = replayBaseElapsed + relativeTimeMs
+            val waitMs = target - now
+
+            if (waitMs <= 0L) return
+
+            val chunk = minOf(waitMs, 50L)
+            Thread.sleep(chunk)
+        }
+    }
+
     private fun sendPacket(
         socket: DatagramSocket,
         address: InetAddress,
@@ -163,32 +158,6 @@ class GDL90ReplayService : Service() {
     ) {
         val packet = DatagramPacket(bytes, bytes.size, address, port)
         socket.send(packet)
-    }
-
-    private fun computeVerticalSpeedFpm(
-        prev: Data.TrackPoint,
-        current: Data.TrackPoint,
-        next: Data.TrackPoint
-    ): Int {
-        val p1: Data.TrackPoint
-        val p2: Data.TrackPoint
-
-        if (next.epoch != current.epoch) {
-            p1 = current
-            p2 = next
-        } else if (current.epoch != prev.epoch) {
-            p1 = prev
-            p2 = current
-        } else {
-            return 0
-        }
-
-        val dtSec = (p2.epoch - p1.epoch).toDouble() / 1000.0
-        if (dtSec <= 0.0) return 0
-
-        val dzMeters = (p2.altitude - p1.altitude).toDouble()
-        val fpm = dzMeters * 3.28084 * 60.0 / dtSec
-        return fpm.roundToInt()
     }
 }
 

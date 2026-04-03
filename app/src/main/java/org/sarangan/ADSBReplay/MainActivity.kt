@@ -4,32 +4,30 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.AttributeSet
 import android.util.Log
 import android.view.View
 import android.widget.Button
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import android.net.Uri
-import android.os.Build
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import java.io.BufferedReader
 import java.io.IOException
-import java.lang.Thread.sleep
 import java.util.Date
-import kotlin.Int
+import kotlin.concurrent.thread
 
-
-const val TAG:String = "GPS"
-
-
-
+const val TAG: String = "GPS"
 
 class MainActivity : AppCompatActivity() {
+
+    @Volatile
+    private var uiUpdaterStarted = false
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -37,13 +35,14 @@ class MainActivity : AppCompatActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Log.d(TAG,"MainActivity onCreate - start")
+        Log.d(TAG, "MainActivity onCreate - start")
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.layout)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
+            if (
+                ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.POST_NOTIFICATIONS
                 ) != PackageManager.PERMISSION_GRANTED
@@ -52,118 +51,137 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        //This is for reading the external file, and passing the Uri to the callback object (which is defined here within {}
-        val gpxFilePicker = registerForActivityResult(ActivityResultContracts.GetContent())
-        { uri: Uri? ->
-            uri?.let {
-                //We open the file only to check if it has a speed tag. Some GPX files do not contain a speed tag. If that is the case, we will have to calculate the speed.
-                var inputStream = contentResolver.openInputStream(uri)
-                val bufferedReader = BufferedReader(inputStream?.reader())
-                var speedExists = false
-                var line: String?
-                do {
-                    line = bufferedReader.readLine()
-                    if (line?.contains("<speed>", ignoreCase = true) == true) {
-                        speedExists = true
-                        break
-                    }
-                } while (line != null)
-                inputStream?.close()    //Close the file once the existence of the speed tag has been determined. InputStream cannot be rewound, so we will close and open it again.
-
-                inputStream = contentResolver.openInputStream(uri)
-                try {
-                    val parser = XmlPullParserHandler() //This is where the XML tags are parsed.
-                    parser.parse(inputStream, speedExists)
-                    Data.currentPoint = 0
-                    when (parser.returnCode) {
-                        0 -> {          //return code of 0 from the XML parser means the file was read successfully
-                            Data.numOfPoints = Data.trackPoints.size    //Data object is accessible globally.
-                            Toast.makeText( //Show a toast message on how many tags were read
-                                baseContext,
-                                "Read ${Data.numOfPoints} points",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
-
-                        1 -> {  //1 means there was some error in the file
-                            Toast.makeText(baseContext, "Invalid File", Toast.LENGTH_SHORT).show()
-                            Data.numOfPoints = 0
-                        }
-                    }
-                } catch (e: IOException) {
-                    e.printStackTrace()
-                }
+        val gpxFilePicker =
+            registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+                uri?.let { openGpxFile(it) }
             }
-        }
 
-
-        //This is the listener for the button that launches the file selector
-        val gpxReadFileButton: Button = findViewById<Button>(R.id.buttonFileOpen)
+        val gpxReadFileButton: Button = findViewById(R.id.buttonFileOpen)
         gpxReadFileButton.setOnClickListener {
-            if (Data.GDL90ReplayServiceIsRunning){
+            if (Data.GDL90ReplayServiceIsRunning) {
                 Data.stopService = true
             }
             gpxFilePicker.launch("*/*")
         }
-        Log.d(TAG,"MainActivity onCreate - exit")
+
+        Log.d(TAG, "MainActivity onCreate - exit")
+    }
+
+    private fun openGpxFile(uri: Uri) {
+        var inputStream = contentResolver.openInputStream(uri)
+        val bufferedReader = BufferedReader(inputStream?.reader())
+
+        var speedExists = false
+        var line: String?
+
+        do {
+            line = bufferedReader.readLine()
+            if (line?.contains("<speed>", ignoreCase = true) == true) {
+                speedExists = true
+                break
+            }
+        } while (line != null)
+
+        inputStream?.close()
+
+        inputStream = contentResolver.openInputStream(uri)
+        try {
+            val parser = XmlPullParserHandler()
+            parser.parse(inputStream, speedExists)
+
+            when (parser.returnCode) {
+                0 -> {
+                    Data.currentPoint = 0
+                    Data.numOfPoints = Data.trackPoints.size
+
+                    Toast.makeText(
+                        baseContext,
+                        "Read ${Data.numOfPoints} points, ${Data.replayEvents.size} replay events",
+                        Toast.LENGTH_LONG
+                    ).show()
+
+                    refreshUiFromData()
+
+                    if (Data.GDL90ReplayServiceIsRunning) {
+                        Data.stopService = true
+                        Thread.sleep(200)
+                    }
+
+                    if (Data.replayEvents.isNotEmpty() && Data.numOfPoints > 0) {
+                        Data.stopService = false
+                        val intentService = Intent(baseContext, GDL90ReplayService::class.java)
+                        Log.d(
+                            TAG,
+                            "Run - Starting Foreground Service with ${Data.replayEvents.size} replay events"
+                        )
+                        ContextCompat.startForegroundService(baseContext, intentService)
+                    }
+                }
+
+                1 -> {
+                    Toast.makeText(baseContext, "Invalid File", Toast.LENGTH_SHORT).show()
+                    Data.clearAll()
+                    refreshUiFromData()
+                }
+
+                else -> {
+                    Toast.makeText(baseContext, "Unable to read file", Toast.LENGTH_SHORT).show()
+                    Data.clearAll()
+                    refreshUiFromData()
+                }
+            }
+        } catch (e: IOException) {
+            e.printStackTrace()
+            Toast.makeText(baseContext, "File read error", Toast.LENGTH_SHORT).show()
+            Data.clearAll()
+            refreshUiFromData()
+        } finally {
+            inputStream?.close()
+        }
     }
 
     override fun onCreateView(name: String, context: Context, attrs: AttributeSet): View? {
-        Log.d(TAG,"MainActivity onCreateView - start")
+        Log.d(TAG, "MainActivity onCreateView - start")
         val v = super.onCreateView(name, context, attrs)
-        Log.d(TAG,"MainActivity onCreateView - exit")
+        Log.d(TAG, "MainActivity onCreateView - exit")
         return v
     }
 
-
     override fun onStart() {
-        Log.d(TAG,"MainActivity onStart - start")
+        Log.d(TAG, "MainActivity onStart - start")
         super.onStart()
-        Log.d(TAG,"MainActivity onStart - exit")
+        Log.d(TAG, "MainActivity onStart - exit")
     }
 
-
     override fun onResume() {
-        Log.d(TAG,"MainActivity onResume - start")
+        Log.d(TAG, "MainActivity onResume - start")
         super.onResume()
-        //We execute the operations in onResume instead of onCreate because onCreate doesn't get called when returning from the file picker.
-        //onResume is also called during initial app start, so we need to handle the case depending on if the data object has been initialized or not.
-        //Data is an object class (doesn't need instantiation).
-        //I suppose we could also do all of this under onStart or onRestart as well.
 
-        //Set the length of the seekbar. During initial app invocation, the datafile will be empty, so we set the length to 0.
-        val seekBar: SeekBar = findViewById<SeekBar>(R.id.seekBar)
-        Log.d(TAG,"Seekbar set: ${Data.numOfPoints}")
+        val seekBar: SeekBar = findViewById(R.id.seekBar)
+
         seekBar.max = if (Data.numOfPoints > 1) {
             Data.numOfPoints - 1
         } else {
             0
         }
 
-        //The seekbar shows the current position, but the user can also drag it to change the current position.
-        //When user drags it, the listener will trigger p2 to true. We simply set a flag (which is seekBarMoved) and the new position, and let the
-        //foreground Service take care of moving the data position. This listener is also triggered every time seekbar.progress is changed -
-        //which is done through a foreground Service Thread that polls currentPosition and sets the seekbar position.
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(p0: SeekBar?, p1: Int, p2: Boolean) {
-                if (p2) { //p2 will be true if the seekbar change was caused by the user dragging the bar. It would be false if the change was caused by the Thread.
-                    Data.seekBarPoint = p1
-                    Data.seekBarMoved = true
-                    sleep(500)  //Sleep for 500ms to allow the GPSMockLocationService thread to use the seekBarPoint and update it to its currentPoint
+            override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (Data.numOfPoints <= 0) {
+                    return
                 }
-                //Update all the field values based on hte current point
-                findViewById<SeekBar>(R.id.seekBar).progress = Data.currentPoint
-                findViewById<TextView>(R.id.tvPoint).text =
-                    Data.currentPoint.toString()
-                findViewById<TextView>(R.id.tvTime).text =
-                    Date(Data.trackPoints[Data.currentPoint].epoch).toString()
-                findViewById<TextView>(R.id.tvAlt).text =
-                    Data.trackPoints[Data.currentPoint].altitude.toFt().toString()
-                findViewById<TextView>(R.id.tvSpeed).text =
-                    Data.trackPoints[Data.currentPoint].speed.toKts().toString()
-                findViewById<GPSTrackPlot.GPSTrackPlot>(R.id.plot)
-                    .setCirclePoint(Data.currentPoint)
-                findViewById<GPSTrackPlot.GPSTrackPlot>(R.id.plot).postInvalidate()
+
+                if (fromUser) {
+                    val clamped = progress.coerceIn(0, Data.numOfPoints - 1)
+                    Data.seekBarPoint = clamped
+                    Data.seekBarMoved = true
+
+                    // Give immediate visual feedback in the UI,
+                    // while the service catches up to the new replay position.
+                    Data.currentPoint = clamped
+                }
+
+                refreshUiFromData()
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {
@@ -171,63 +189,93 @@ class MainActivity : AppCompatActivity() {
 
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
             }
-        }
-        )
+        })
 
-        //Next update the track plot.
+        refreshUiFromData()
+        startUiUpdaterIfNeeded()
+
+        Log.d(TAG, "MainActivity onResume - exit")
+    }
+
+    private fun refreshUiFromData() {
+        val seekBar: SeekBar = findViewById(R.id.seekBar)
+        val tvPoint: TextView = findViewById(R.id.tvPoint)
+        val tvTime: TextView = findViewById(R.id.tvTime)
+        val tvAlt: TextView = findViewById(R.id.tvAlt)
+        val tvSpeed: TextView = findViewById(R.id.tvSpeed)
         val trackPlot = findViewById<GPSTrackPlot.GPSTrackPlot>(R.id.plot)
+
+        if (Data.numOfPoints <= 0 || Data.trackPoints.isEmpty()) {
+            seekBar.progress = 0
+            tvPoint.text = "0"
+            tvTime.text = ""
+            tvAlt.text = ""
+            tvSpeed.text = ""
+
+            trackPlot.setTrackData(Data)
+            trackPlot.makeBitmap = true
+            trackPlot.setCirclePoint(0)
+            trackPlot.postInvalidate()
+            return
+        }
+
+        val pointIndex = Data.currentPoint.coerceIn(0, Data.numOfPoints - 1)
+        val tp = Data.trackPoints[pointIndex]
+
+        if (seekBar.progress != pointIndex) {
+            seekBar.progress = pointIndex
+        }
+
+        tvPoint.text = pointIndex.toString()
+        tvTime.text = Date(tp.epoch).toString()
+        tvAlt.text = tp.altitude.toFt().toString()
+        tvSpeed.text = tp.speed.toKts().toString()
+
         trackPlot.setTrackData(Data)
         trackPlot.makeBitmap = true
-        trackPlot.setCirclePoint(Data.currentPoint)
+        trackPlot.setCirclePoint(pointIndex)
         trackPlot.postInvalidate()
+    }
 
+    private fun startUiUpdaterIfNeeded() {
+        if (uiUpdaterStarted) return
+        uiUpdaterStarted = true
 
-        //We launch a thread that continuously checks the data position (which is handled by the foreground Service Thread) and update the seekbar position. This will
-        //automatically trigger the seekbar listener every time (once per 50ms).
-        Thread {
+        thread(start = true, name = "ui-updater-thread") {
             while (true) {
-                seekBar.progress = Data.currentPoint
-                sleep(50)
+                try {
+                    runOnUiThread {
+                        refreshUiFromData()
+                    }
+                    Thread.sleep(100)
+                } catch (_: Exception) {
+                }
             }
-        }.start()
-
-        //If the GDL90ReplayService is not already running, and there is valid data, launch the foreground service.
-        //If we open a second GPX file while one is already running, we don't want to launch a second service thread.
-        if ((!Data.GDL90ReplayServiceIsRunning)&&(Data.numOfPoints > 1)) {
-            Data.stopService = false
-            val intentService = Intent(baseContext, GDL90ReplayService::class.java)
-            Log.d(TAG,"Run - Starting Foreground Service")
-            Data.serviceStartTime = System.currentTimeMillis()
-            Data.trackStartTime = Data.trackPoints[0].epoch
-            ContextCompat.startForegroundService(baseContext, intentService)
         }
-
-        Log.d(TAG,"MainActivity onResume - exit")
     }
 
     override fun onStop() {
-        Log.d(TAG,"MainActivity onStop - start")
+        Log.d(TAG, "MainActivity onStop - start")
         super.onStop()
-        Log.d(TAG,"MainActivity onStop - exit")
+        Log.d(TAG, "MainActivity onStop - exit")
     }
 
     override fun onPause() {
-        Log.d(TAG,"MainActivity onPause - start")
+        Log.d(TAG, "MainActivity onPause - start")
         super.onPause()
-        Log.d(TAG,"MainActivity onPause - exit")
+        Log.d(TAG, "MainActivity onPause - exit")
     }
 
     override fun onRestart() {
-        Log.d(TAG,"MainActivity onRestart - start")
+        Log.d(TAG, "MainActivity onRestart - start")
         super.onRestart()
-        Log.d(TAG,"MainActivity onRestart - exit")
+        Log.d(TAG, "MainActivity onRestart - exit")
     }
 
     override fun onDestroy() {
-        Log.d(TAG,"MainActivity onDestroy - start")
+        Log.d(TAG, "MainActivity onDestroy - start")
         super.onDestroy()
         Data.stopService = true
-        Log.d(TAG,"MainActivity onDestroy - exit")
+        Log.d(TAG, "MainActivity onDestroy - exit")
     }
-
 }
