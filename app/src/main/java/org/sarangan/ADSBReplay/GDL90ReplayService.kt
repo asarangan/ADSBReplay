@@ -67,9 +67,8 @@ class GDL90ReplayService : Service() {
 
                 Data.GDL90ReplayServiceIsRunning = true
 
-                var eventIndex = getStartEventIndexFromCurrentPoint()
-                var replayBaseElapsed = SystemClock.elapsedRealtime() -
-                        Data.replayEvents[eventIndex].relativeTimeMs
+                var eventIndex = 0
+                var replayBaseElapsed = SystemClock.elapsedRealtime()
 
                 while (eventIndex < Data.replayEvents.size) {
                     if (Data.stopService) break
