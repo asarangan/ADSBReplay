@@ -3,21 +3,37 @@ package org.sarangan.ADSBReplay
 import kotlin.math.PI
 
 object Data {
-    var currentPoint = 0
-    var seekBarPoint = 0
-    var seekBarMoved = false
+
+
+    @Volatile var currentPoint = 0
+    @Volatile var seekBarPoint = 0
+    @Volatile var seekBarMoved = false
     var numOfPoints = 0
     val trackPoints: MutableList<TrackPoint> = mutableListOf()
 
+
+    @Volatile var sentOwnshipCount = 0
+    @Volatile var sentGeoAltCount = 0
+    @Volatile var sentTrafficCount = 0
+    @Volatile var sentUplinkCount = 0
+
+    var totalOwnshipCount = 0
+    var totalGeoAltCount = 0
+    var totalTrafficCount = 0
+    var totalUplinkCount = 0
+
     var serviceStartTime: Long = 0
     var trackStartTime: Long = 0
+
+    @Volatile
+    var currentGeoAltMeters: Double? = null
 
     var replayStartEpoch: Long = 0L
     var replayEndEpoch: Long = 0L
     var replayDurationMs: Long = 0L
 
-    var GDL90ReplayServiceIsRunning = false
-    var stopService = false
+    @Volatile var GDL90ReplayServiceIsRunning = false
+    @Volatile var stopService = false
 
     val timedPackets: MutableList<TimedPacket> = mutableListOf()
     val replayEvents: MutableList<ReplayEvent> = mutableListOf()
@@ -30,6 +46,34 @@ object Data {
     const val TYPE_OWNSHIP = 10
     const val TYPE_OWNSHIP_GEO_ALT = 11
     const val TYPE_TRAFFIC = 20
+
+    fun recomputeSentCountersUpToEvent(eventIndexExclusive: Int) {
+        sentOwnshipCount = 0
+        sentGeoAltCount = 0
+        sentTrafficCount = 0
+        sentUplinkCount = 0
+        currentGeoAltMeters = null
+
+        val limit = eventIndexExclusive.coerceIn(0, replayEvents.size)
+        for (i in 0 until limit) {
+            when (replayEvents[i].type) {
+                TYPE_OWNSHIP -> sentOwnshipCount++
+                TYPE_OWNSHIP_GEO_ALT -> {
+                    sentGeoAltCount++
+
+                    val bytes = replayEvents[i].bytes
+                    if (bytes.size >= 4 && (bytes[0].toInt() and 0xFF) == 0x7E) {
+                        val geoAlt5Ft =
+                            ((bytes[2].toInt() and 0xFF) shl 8) or
+                                    (bytes[3].toInt() and 0xFF)
+                        currentGeoAltMeters = (geoAlt5Ft * 5.0) / 3.28084
+                    }
+                }
+                TYPE_TRAFFIC -> sentTrafficCount++
+                TYPE_UPLINK -> sentUplinkCount++
+            }
+        }
+    }
 
     class TrackPoint {
         var epoch: Long = 0
@@ -60,6 +104,8 @@ object Data {
         seekBarMoved = false
         numOfPoints = 0
 
+        currentGeoAltMeters = null
+
         trackPoints.clear()
         timedPackets.clear()
         replayEvents.clear()
@@ -72,6 +118,17 @@ object Data {
         serviceStartTime = 0L
         trackStartTime = 0L
         stopService = false
+
+        sentOwnshipCount = 0
+        sentGeoAltCount = 0
+        sentTrafficCount = 0
+        sentUplinkCount = 0
+
+        totalOwnshipCount = 0
+        totalGeoAltCount = 0
+        totalTrafficCount = 0
+        totalUplinkCount = 0
+
     }
 
     fun buildReplayTimeline() {
@@ -163,6 +220,18 @@ object Data {
 
             trackPointToReplayEventIndex.add(idx)
         }
+
+        totalOwnshipCount = replayEvents.count { it.type == TYPE_OWNSHIP }
+        totalGeoAltCount = replayEvents.count { it.type == TYPE_OWNSHIP_GEO_ALT }
+        totalTrafficCount = replayEvents.count { it.type == TYPE_TRAFFIC }
+        totalUplinkCount = replayEvents.count { it.type == TYPE_UPLINK }
+
+        sentOwnshipCount = 0
+        sentGeoAltCount = 0
+        sentTrafficCount = 0
+        sentUplinkCount = 0
+
+
     }
 
     private fun priorityForType(type: Int): Int {
@@ -225,3 +294,8 @@ fun Double.toDeg(): Double {
 fun Float.toFt(): Double {
     return (this * 32.8084).toInt() / 10.0
 }
+
+fun Double.toFt(): Double {
+    return (this * 3.28084 * 10.0).toInt() / 10.0
+}
+

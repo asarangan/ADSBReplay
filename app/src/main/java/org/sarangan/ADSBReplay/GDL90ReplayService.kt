@@ -67,40 +67,99 @@ class GDL90ReplayService : Service() {
 
                 Data.GDL90ReplayServiceIsRunning = true
 
+                // Cold start always begins from the first replay event.
                 var eventIndex = 0
                 var replayBaseElapsed = SystemClock.elapsedRealtime()
+
+                // Reset progress counters at replay start.
+                Data.sentOwnshipCount = 0
+                Data.sentGeoAltCount = 0
+                Data.sentTrafficCount = 0
+                Data.sentUplinkCount = 0
+                Data.currentGeoAltMeters = null
 
                 while (eventIndex < Data.replayEvents.size) {
                     if (Data.stopService) break
 
                     if (Data.seekBarMoved) {
-                        val seekPoint = Data.seekBarPoint.coerceIn(0, (Data.numOfPoints - 1).coerceAtLeast(0))
+                        val seekPoint = Data.seekBarPoint.coerceIn(
+                            0,
+                            (Data.numOfPoints - 1).coerceAtLeast(0)
+                        )
+
                         Data.currentPoint = seekPoint
                         eventIndex = getEventIndexForTrackPoint(seekPoint)
+                        Data.recomputeSentCountersUpToEvent(eventIndex)
                         Data.seekBarMoved = false
+
                         replayBaseElapsed = SystemClock.elapsedRealtime() -
                                 Data.replayEvents[eventIndex].relativeTimeMs
                     }
 
                     val event = Data.replayEvents[eventIndex]
-                    waitUntilTargetTime(event.relativeTimeMs, replayBaseElapsed)
+
+                    waitUntilTargetTime(
+                        event.relativeTimeMs,
+                        replayBaseElapsed
+                    )
 
                     if (Data.stopService) break
+                    if (Data.seekBarMoved) continue
 
-                    sendPacket(socket, loopback, GDL90.UDP_PORT, event.bytes)
+                    sendPacket(
+                        socket,
+                        loopback,
+                        GDL90.UDP_PORT,
+                        event.bytes
+                    )
 
-                    if (event.type == Data.TYPE_OWNSHIP) {
-                        event.sourceTrackPointIndex?.let { idx ->
-                            Data.currentPoint = idx
-                            Data.trackStartTime = Data.trackPoints[idx].epoch
-                            Data.serviceStartTime = System.currentTimeMillis()
+                    when (event.type) {
+
+                        Data.TYPE_OWNSHIP -> {
+                            Data.sentOwnshipCount++
+
+                            event.sourceTrackPointIndex?.let { idx ->
+                                Data.currentPoint = idx
+                                Data.trackStartTime = Data.trackPoints[idx].epoch
+                                Data.serviceStartTime = System.currentTimeMillis()
+                            }
+                        }
+
+                        Data.TYPE_OWNSHIP_GEO_ALT -> {
+                            Data.sentGeoAltCount++
+
+                            // Fully framed packet:
+                            // [0]=0x7E, [1]=0x0B, [2]=alt MSB, [3]=alt LSB, ...
+                            if (event.bytes.size >= 9 &&
+                                (event.bytes[0].toInt() and 0xFF) == 0x7E &&
+                                (event.bytes[1].toInt() and 0xFF) == 0x0B
+                            ) {
+                                val geoAlt5Ft =
+                                    ((event.bytes[2].toInt() and 0xFF) shl 8) or
+                                            (event.bytes[3].toInt() and 0xFF)
+
+                                Data.currentGeoAltMeters =
+                                    (geoAlt5Ft * 5.0) / 3.28084
+                            }
+                        }
+
+                        Data.TYPE_TRAFFIC -> {
+                            Data.sentTrafficCount++
+                        }
+
+                        Data.TYPE_UPLINK -> {
+                            Data.sentUplinkCount++
                         }
                     }
 
                     Log.d(
                         TAG,
-                        "Replay eventIndex=$eventIndex type=${event.type} " +
-                                "t=${event.relativeTimeMs} currentPoint=${Data.currentPoint}"
+                        "Replay eventIndex=$eventIndex " +
+                                "type=${event.type} " +
+                                "t=${event.relativeTimeMs} " +
+                                "currentPoint=${Data.currentPoint} " +
+                                "traf=${Data.sentTrafficCount}/${Data.totalTrafficCount} " +
+                                "uplink=${Data.sentUplinkCount}/${Data.totalUplinkCount}"
                     )
 
                     eventIndex++
@@ -113,14 +172,6 @@ class GDL90ReplayService : Service() {
         }.start()
 
         return START_NOT_STICKY
-    }
-
-    private fun getStartEventIndexFromCurrentPoint(): Int {
-        return if (Data.currentPoint in Data.trackPointToReplayEventIndex.indices) {
-            Data.trackPointToReplayEventIndex[Data.currentPoint]
-        } else {
-            0
-        }
     }
 
     private fun getEventIndexForTrackPoint(trackPointIndex: Int): Int {
