@@ -25,6 +25,7 @@ class GPSTrackPlot {
         ) {
         }
 
+        private var hasValidTrackData: Boolean = false
         private var trackPaint: Paint = Paint().apply {
             style = Paint.Style.STROKE
             strokeWidth = 5F
@@ -51,6 +52,7 @@ class GPSTrackPlot {
 
         fun setTrackData(data: Data) {
             if (data.numOfPoints > 0) {
+                hasValidTrackData = true
                 xDataPoints = FloatArray(data.numOfPoints)
                 yDataPoints = FloatArray(data.numOfPoints)
                 for (i in 0 until data.numOfPoints) {
@@ -58,6 +60,7 @@ class GPSTrackPlot {
                     yDataPoints[i] = data.trackPoints[i].lat.toFloat()
                 }
             } else {
+                hasValidTrackData = false
                 xDataPoints = FloatArray(2)
                 yDataPoints = FloatArray(2)
                 xDataPoints[0] = 0F
@@ -134,10 +137,14 @@ class GPSTrackPlot {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+
+            if (!hasValidTrackData) {
+                return
+            }
+
             if (makeBitmap) {
                 makeBitmap()
-                circleRadius =
-                    height / 100F  //This has to be set here because height and width become valid only in onDraw
+                circleRadius = height / 100F
                 canvas.drawBitmap(bitmapObject, 0F, 0F, null)
             }
 
