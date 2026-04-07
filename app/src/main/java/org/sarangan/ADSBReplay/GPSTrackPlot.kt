@@ -75,17 +75,38 @@ class GPSTrackPlot {
         private fun makeBitmap() {
             bitmapObject = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             trackPath = Path()
-            xDataOffset = xDataPoints.minOf { it }
-            yDataOffset = yDataPoints.minOf { it }
-            xScale = width * 0.95F / (xDataPoints.maxOf { it } - xDataPoints.minOf { it })
-            yScale = height * 0.95F / (yDataPoints.maxOf { it } - yDataPoints.minOf { it })
+
+            val xMin = xDataPoints.minOf { it }
+            val xMax = xDataPoints.maxOf { it }
+            val yMin = yDataPoints.minOf { it }
+            val yMax = yDataPoints.maxOf { it }
+
+            val xRangeRaw = xMax - xMin
+            val yRangeRaw = yMax - yMin
+
+            // Prevent divide-by-zero for degenerate cases
+            val xRange = if (xRangeRaw <= 0F) 1.0F else xRangeRaw
+            val yRange = if (yRangeRaw <= 0F) 1.0F else yRangeRaw
+
+            val maxRange = maxOf(xRange, yRange)
+
+            // Center the data in the unused dimension
+            xDataOffset = xMin - (maxRange - xRange) / 2F
+            yDataOffset = yMin - (maxRange - yRange) / 2F
+
+            xScale = width * 0.95F / maxRange
+            yScale = height * 0.95F / maxRange
+
             val myCanvas = Canvas(bitmapObject)
+
             var myPixel: Pixel = toPixel(xDataPoints[0], yDataPoints[0])
-            trackPath.moveTo(myPixel.x, myPixel.y) //shift origin to graph's origin
+            trackPath.moveTo(myPixel.x, myPixel.y)
+
             for (i in 0 until xDataPoints.size) {
                 myPixel = toPixel(xDataPoints[i], yDataPoints[i])
                 trackPath.lineTo(myPixel.x, myPixel.y)
             }
+
             myCanvas.drawPath(trackPath, trackPaint)
         }
 
