@@ -11,6 +11,7 @@ import android.util.AttributeSet
 import android.util.Log
 import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +25,7 @@ import kotlin.concurrent.thread
 const val TAG: String = "GPS"
 
 class MainActivity : AppCompatActivity() {
+
 
     @Volatile
     private var uiUpdaterStarted = false
@@ -142,6 +144,11 @@ class MainActivity : AppCompatActivity() {
                             TAG,
                             "Run - Starting Foreground Service"
                         )
+
+                        val etFilterTail: EditText = findViewById(R.id.etFilterTail)
+
+                        Data.filteredTailNumber =
+                            Data.normalizeTailNumber(etFilterTail.text.toString())
 
                         ContextCompat.startForegroundService(
                             baseContext,
@@ -301,7 +308,7 @@ class MainActivity : AppCompatActivity() {
             findViewById(R.id.tvTraf)
 
         val tvUplink: TextView =
-            findViewById(R.id.tvUplink)
+            findViewById(R.id.tvNnumber)
 
         val trackPlot =
             findViewById<GPSTrackPlot.GPSTrackPlot>(

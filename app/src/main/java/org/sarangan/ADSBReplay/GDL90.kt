@@ -242,4 +242,83 @@ object GDL90 {
         val sec = cal.get(Calendar.SECOND)
         return hour * 3600 + min * 60 + sec
     }
+
+    fun frameLoggedPacket(packet: ByteArray): ByteArray? {
+        val payloadOnly = extractPayloadWithoutCrc(packet) ?: return null
+
+        val msgType = payloadOnly[0].toInt() and 0xFF
+
+        when (msgType) {
+            MSG_OWNSHIP_GEO_ALT -> {
+                if (payloadOnly.size != 5) return null
+            }
+
+            0x14 -> { // traffic
+                if (payloadOnly.size != 28) return null
+            }
+
+            0x07 -> { // uplink
+                if (payloadOnly.size < 5 || payloadOnly.size > 432) {
+                    return null
+                }
+            }
+        }
+
+        return frame(payloadOnly)
+    }
+
+    private fun extractPayloadWithoutCrc(packet: ByteArray): ByteArray? {
+        if (packet.isEmpty()) return null
+
+        val start =
+            if ((packet.first().toInt() and 0xFF) == FLAG) 1 else 0
+
+        val end =
+            if ((packet.last().toInt() and 0xFF) == FLAG) packet.size - 1 else packet.size
+
+        if (end <= start) return null
+
+        val body = packet.copyOfRange(start, end)
+
+        val deescaped = ByteArrayOutputStream()
+        var i = 0
+
+        while (i < body.size) {
+            val b = body[i].toInt() and 0xFF
+
+            if (b == ESC) {
+                if (i + 1 >= body.size) return null
+                val next = body[i + 1].toInt() and 0xFF
+                deescaped.write(next xor ESC_XOR)
+                i += 2
+            } else {
+                deescaped.write(b)
+                i++
+            }
+        }
+
+        val clear = deescaped.toByteArray()
+
+        // clear = payload + CRC
+        if (clear.size <= 2) return null
+
+        return clear.copyOfRange(0, clear.size - 2)
+    }
+
+    fun trafficCallsignFromLoggedPacket(packet: ByteArray): String? {
+        val payload = extractPayloadWithoutCrc(packet) ?: return null
+
+        if (payload.isEmpty()) return null
+        if ((payload[0].toInt() and 0xFF) != 0x14) return null
+
+        // Traffic report payload should contain callsign bytes 20..27.
+        if (payload.size < 28) return null
+
+        return payload
+            .copyOfRange(19, 27)
+            .toString(Charsets.US_ASCII)
+            .trim()
+    }
+
+
 }

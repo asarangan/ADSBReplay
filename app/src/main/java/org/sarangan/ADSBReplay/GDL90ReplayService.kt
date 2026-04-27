@@ -106,11 +106,63 @@ class GDL90ReplayService : Service() {
                     if (Data.stopService) break
                     if (Data.seekBarMoved) continue
 
+                    if (event.type == Data.TYPE_TRAFFIC) {
+                        val filterTail = Data.normalizeTailNumber(Data.filteredTailNumber)
+
+                        if (filterTail.isNotEmpty()) {
+                            val trafficCallsignRaw =
+                                GDL90.trafficCallsignFromLoggedPacket(event.bytes)
+
+                            val trafficCallsign =
+                                Data.normalizeTailNumber(trafficCallsignRaw)
+
+//                            Log.d(
+//                                TAG,
+//                                "TRAFFIC FILTER CHECK: raw=$trafficCallsignRaw " +
+//                                        "decoded=$trafficCallsign filter=$filterTail " +
+//                                        "eventIndex=$eventIndex"
+//                            )
+
+                            if (trafficCallsign == filterTail) {
+                                Data.sentTrafficCount++
+
+                                Log.d(
+                                    TAG,
+                                    "FILTERED traffic: callsign=$trafficCallsign " +
+                                            "filter=$filterTail eventIndex=$eventIndex"
+                                )
+
+                                eventIndex++
+                                continue
+                            }
+                        }
+                    }
+
+
+                    val bytesToSend: ByteArray? =
+                        when (event.type) {
+                            Data.TYPE_TRAFFIC,
+                            Data.TYPE_UPLINK,
+                            Data.TYPE_OWNSHIP_GEO_ALT -> GDL90.frameLoggedPacket(event.bytes)
+
+                            else -> event.bytes
+                        }
+
+                    if (bytesToSend == null) {
+                        Log.w(
+                            TAG,
+                            "SKIP malformed packet eventIndex=$eventIndex " +
+                                    "type=${event.type} rawLen=${event.bytes.size}"
+                        )
+                        eventIndex++
+                        continue
+                    }
+
                     sendPacket(
                         socket,
                         loopback,
                         GDL90.UDP_PORT,
-                        event.bytes
+                        bytesToSend
                     )
 
                     when (event.type) {
@@ -149,6 +201,12 @@ class GDL90ReplayService : Service() {
 
                         Data.TYPE_UPLINK -> {
                             Data.sentUplinkCount++
+
+                            Log.d(
+                                TAG,
+                                "SENT UPLINK eventIndex=$eventIndex " +
+                                        "rawLen=${event.bytes.size} sendLen=${bytesToSend.size}"
+                            )
                         }
                     }
 
@@ -233,3 +291,6 @@ class TrackPlayServiceNotification {
         return builder.build()
     }
 }
+
+
+

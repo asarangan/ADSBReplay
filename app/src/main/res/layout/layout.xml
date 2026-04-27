@@ -259,7 +259,7 @@
                 android:layout_height="match_parent"
                 android:orientation="horizontal">
                 <TextView
-                    android:id="@+id/tvUplink"
+                    android:id="@+id/tvNnumber"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="left|center_vertical"
@@ -268,11 +268,32 @@
                     android:textAlignment="gravity"
                     android:textSize="14sp" />
             </LinearLayout>
+
         </TableRow>
 
+        <TableRow
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
 
-
-
+            <TextView
+                android:id="@+id/textView12"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical"
+                android:gravity="right"
+                android:text="Tail #:"
+                android:textAlignment="gravity"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+                <EditText
+                    android:id="@+id/etFilterTail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ems="10"
+                    android:inputType="text"
+                    android:textSize="12sp"
+                    android:text="@string/nnumber" />
+        </TableRow>
 
 
     </TableLayout>

@@ -4,6 +4,8 @@ import kotlin.math.PI
 
 object Data {
 
+    // Data.kt
+    @Volatile var filteredTailNumber: String = ""
 
     @Volatile var currentPoint = 0
     @Volatile var seekBarPoint = 0
@@ -129,6 +131,13 @@ object Data {
         totalTrafficCount = 0
         totalUplinkCount = 0
 
+    }
+
+    fun normalizeTailNumber(s: String?): String {
+        return s
+            ?.uppercase()
+            ?.replace("[^A-Z0-9]".toRegex(), "")
+            ?: ""
     }
 
     fun buildReplayTimeline() {
