@@ -78,6 +78,7 @@ class GDL90ReplayService : Service() {
                 Data.sentUplinkCount = 0
                 Data.currentGeoAltMeters = null
 
+                var uplinkCount = 0
                 while (eventIndex < Data.replayEvents.size) {
                     if (Data.stopService) break
 
@@ -136,6 +137,22 @@ class GDL90ReplayService : Service() {
 //                        eventIndex++
 //                        continue
 //                    }
+
+
+//                    if (event.type == Data.TYPE_UPLINK && eventIndex in 18601..18601) {
+//                        Log.d(TAG, "SKIP narrowed uplink window eventIndex=$eventIndex rawLen=${event.bytes.size}")
+//                        eventIndex++
+//                        continue
+//                    }
+
+//                    if (event.type == Data.TYPE_UPLINK &&
+//                        eventIndex in setOf(4132, 7133, 8334, 8917, 9393, 9446,
+//                            22022, 22088, 22815, 28375, 31009, 33441)) {
+//                        Log.d(TAG, "SKIP exact bad-empty uplink eventIndex=$eventIndex")
+//                        eventIndex++
+//                        continue
+//                    }
+
 
 
                     val bytesToSend: ByteArray? =
