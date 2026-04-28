@@ -13,6 +13,7 @@ object Data {
     var numOfPoints = 0
     val trackPoints: MutableList<TrackPoint> = mutableListOf()
 
+    val filteredTrafficAddresses = mutableSetOf<Int>()
 
     @Volatile var sentOwnshipCount = 0
     @Volatile var sentGeoAltCount = 0

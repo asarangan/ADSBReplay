@@ -107,36 +107,35 @@ class GDL90ReplayService : Service() {
                     if (Data.seekBarMoved) continue
 
                     if (event.type == Data.TYPE_TRAFFIC) {
+                        val addr = GDL90.trafficAddressFromLoggedPacket(event.bytes)
                         val filterTail = Data.normalizeTailNumber(Data.filteredTailNumber)
+                        val trafficCallsign =
+                            Data.normalizeTailNumber(GDL90.trafficCallsignFromLoggedPacket(event.bytes))
 
-                        if (filterTail.isNotEmpty()) {
-                            val trafficCallsignRaw =
-                                GDL90.trafficCallsignFromLoggedPacket(event.bytes)
+                        if (filterTail.isNotEmpty() && trafficCallsign == filterTail && addr != null) {
+                            Data.filteredTrafficAddresses.add(addr)
+                        }
 
-                            val trafficCallsign =
-                                Data.normalizeTailNumber(trafficCallsignRaw)
+                        if (addr != null && Data.filteredTrafficAddresses.contains(addr)) {
+                            Data.sentTrafficCount++
 
-//                            Log.d(
-//                                TAG,
-//                                "TRAFFIC FILTER CHECK: raw=$trafficCallsignRaw " +
-//                                        "decoded=$trafficCallsign filter=$filterTail " +
-//                                        "eventIndex=$eventIndex"
-//                            )
+                            Log.d(
+                                TAG,
+                                "FILTERED traffic: callsign=$trafficCallsign " +
+                                        "addr=%06X eventIndex=$eventIndex".format(addr)
+                            )
 
-                            if (trafficCallsign == filterTail) {
-                                Data.sentTrafficCount++
-
-                                Log.d(
-                                    TAG,
-                                    "FILTERED traffic: callsign=$trafficCallsign " +
-                                            "filter=$filterTail eventIndex=$eventIndex"
-                                )
-
-                                eventIndex++
-                                continue
-                            }
+                            eventIndex++
+                            continue
                         }
                     }
+
+//                    if (event.type == Data.TYPE_UPLINK) {
+//                        Log.w(TAG, "SKIPPING UPLINK eventIndex=$eventIndex len=${event.bytes.size}")
+//                        Data.sentUplinkCount++
+//                        eventIndex++
+//                        continue
+//                    }
 
 
                     val bytesToSend: ByteArray? =
@@ -157,6 +156,19 @@ class GDL90ReplayService : Service() {
                         eventIndex++
                         continue
                     }
+
+                    if (event.type == Data.TYPE_TRAFFIC) {
+                        val sentCallsign =
+                            Data.normalizeTailNumber(
+                                GDL90.trafficCallsignFromLoggedPacket(event.bytes)
+                            )
+
+                        Log.d(
+                            TAG,
+                            "SENDING TRAFFIC: callsign=$sentCallsign eventIndex=$eventIndex"
+                        )
+                    }
+
 
                     sendPacket(
                         socket,

@@ -244,7 +244,20 @@ object GDL90 {
     }
 
     fun frameLoggedPacket(packet: ByteArray): ByteArray? {
-        val payloadOnly = extractPayloadWithoutCrc(packet) ?: return null
+        if (packet.size < 4) return null
+
+        val start = if ((packet.first().toInt() and 0xFF) == FLAG) 1 else 0
+        val end = if ((packet.last().toInt() and 0xFF) == FLAG) packet.size - 1 else packet.size
+
+        if (end <= start) return null
+
+        // Interior is stored as raw, unescaped bytes: message + old CRC
+        val clear = packet.copyOfRange(start, end)
+
+        if (clear.size <= 2) return null
+
+        val payloadOnly = clear.copyOfRange(0, clear.size - 2)
+        if (payloadOnly.isEmpty()) return null
 
         val msgType = payloadOnly[0].toInt() and 0xFF
 
@@ -258,12 +271,11 @@ object GDL90 {
             }
 
             0x07 -> { // uplink
-                if (payloadOnly.size < 5 || payloadOnly.size > 432) {
-                    return null
-                }
+                if (payloadOnly.size < 5 || payloadOnly.size > 440) return null
             }
         }
 
+        // frame() recomputes CRC and escapes interior 7E/7D correctly.
         return frame(payloadOnly)
     }
 
@@ -318,6 +330,17 @@ object GDL90 {
             .copyOfRange(19, 27)
             .toString(Charsets.US_ASCII)
             .trim()
+    }
+
+    fun trafficAddressFromLoggedPacket(packet: ByteArray): Int? {
+        val payload = extractPayloadWithoutCrc(packet) ?: return null
+
+        if (payload.size < 5) return null
+        if ((payload[0].toInt() and 0xFF) != 0x14) return null
+
+        return ((payload[2].toInt() and 0xFF) shl 16) or
+                ((payload[3].toInt() and 0xFF) shl 8) or
+                (payload[4].toInt() and 0xFF)
     }
 
 
