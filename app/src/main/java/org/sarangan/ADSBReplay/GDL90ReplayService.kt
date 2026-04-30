@@ -57,8 +57,8 @@ class GDL90ReplayService : Service() {
         Thread {
             val loopback = InetAddress.getByName("127.0.0.1")
             val socket = DatagramSocket()
-            val logTraffic = false
-            val logUplink = true
+            val logTraffic = true
+            val logUplink = false
             val logGPS = false
 
             try {
@@ -114,58 +114,90 @@ class GDL90ReplayService : Service() {
                     if (Data.stopService) break
                     if (Data.seekBarMoved) continue
 
+                    //Traffic logging and skipping logic
                     if (event.type == Data.TYPE_TRAFFIC) {
-                        val hexHead = event.bytes.take(16)
+                        val hexHead = event.bytes.take(8)
                             .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
-                        val hexTail = event.bytes.takeLast(16)
+                        val hexTail = event.bytes.takeLast(8)
                             .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
-                        var skipThis = false
+
                         val skipAll = false  //Set this true to skip every traffic
 
-//                        if (eventIndex in setOf(8334,18600,48820)) {
-//                            skipThis = true
-//                        }
+                        val skipGroup = setOf(8334, 18600, 48820)
 
-                        if (skipAll) {
-                            skipThis = true
-                        }
-
-                        if (skipThis) {
+                        if (skipAll || (eventIndex in skipGroup)) {
                             if (logTraffic) {
                                 Log.d(
                                     TAG,
-                                    "Traffoc TXSEQ=$seq GPXIDX=$eventIndex TRAFFIC_ORD=$trafficOrdinal " +
+                                    "Skipping Traffic TXSEQ=$seq GPXIDX=$eventIndex TRAFFIC_ORD=$trafficOrdinal " +
                                             "time=${event.relativeTimeMs} rawLen=${event.bytes.size} " +
                                             "head=$hexHead tail=$hexTail"
                                 )
                             }
+                            eventIndex++
+                            continue
                         }
 
                         trafficOrdinal++
-                    }
 
-                    val addr = GDL90.trafficAddressFromLoggedPacket(event.bytes)
-                    val filterTail = Data.normalizeTailNumber(Data.filteredTailNumber)
-                    val trafficCallsign =
-                        Data.normalizeTailNumber(GDL90.trafficCallsignFromLoggedPacket(event.bytes))
+                        val rawCallsign =
+                            GDL90.trafficCallsignFromLoggedPacket(event.bytes)
 
-                    if (filterTail.isNotEmpty() && trafficCallsign == filterTail && addr != null) {
-                        Data.filteredTrafficAddresses.add(addr)
-                    }
+                        val trafficCallsign =
+                            Data.normalizeTailNumber(rawCallsign)
 
-                    if (addr != null && Data.filteredTrafficAddresses.contains(addr)) {
-                        Data.sentTrafficCount++
+                        val addr =
+                            GDL90.trafficAddressFromLoggedPacket(event.bytes)
 
-                        if (logTraffic) {
-                            Log.d(
-                                TAG,
-                                "FILTERED traffic: callsign=$trafficCallsign " +
-                                        "addr=%06X eventIndex=$eventIndex".format(addr)
-                            )
+                        val filterTail =
+                            Data.normalizeTailNumber(Data.myTailNumber)
+
+                        val callsignMatches =
+                            filterTail.isNotEmpty() && trafficCallsign == filterTail
+
+                        val rawCallsignContainsFilter =
+                            filterTail.isNotEmpty() &&
+                                    rawCallsign?.contains(filterTail, ignoreCase = true) == true
+
+                        if ((callsignMatches || rawCallsignContainsFilter) && addr != null) {
+                            Data.filteredTrafficAddresses.add(addr)
                         }
 
-                        eventIndex++
-                        continue
+                        val addressMatches =
+                            addr != null && Data.filteredTrafficAddresses.contains(addr)
+
+                        if (callsignMatches || rawCallsignContainsFilter || addressMatches) {
+                            if (logTraffic) {
+                                Log.d(
+                                    TAG,
+                                    "FILTERED traffic: raw=$rawCallsign " +
+                                            "callsign=$trafficCallsign " +
+                                            "filter=$filterTail " +
+                                            "addr=${addr?.let { "%06X".format(it) } ?: "NULL"} " +
+                                            "reason=${
+                                                when {
+                                                    callsignMatches -> "CALLSIGN"
+                                                    rawCallsignContainsFilter -> "RAW_CALLSIGN"
+                                                    else -> "ADDRESS"
+                                                }
+                                            } " +
+                                            "eventIndex=$eventIndex"
+                                )
+                            }
+
+                            eventIndex++
+                            continue
+                        }
+
+                        if (logTraffic){
+                            Log.d(
+                                TAG,
+                                "Traffic TXSEQ=$seq GPXIDX=$eventIndex TRAFFIC_ORD=$trafficOrdinal " +
+                                        "time=${event.relativeTimeMs} rawLen=${event.bytes.size} " +
+                                        "callsign=$trafficCallsign " +
+                                        "head=$hexHead tail=$hexTail"
+                            )
+                        }
                     }
 
 
@@ -178,7 +210,8 @@ class GDL90ReplayService : Service() {
                        val skipAll = false  //Set this true to skip every uplink
 
                        //Known bad packets
-                       if (eventIndex in setOf(8334,18600,48820)) {
+                       //if (eventIndex in setOf(8334,18600,48820)) {
+                       if (eventIndex in setOf(0) ){
                            skipThis = true
                        }
 
@@ -233,11 +266,11 @@ class GDL90ReplayService : Service() {
                     }
 
                     if (event.type == Data.TYPE_TRAFFIC) {
-                        val sentCallsign =
-                            Data.normalizeTailNumber(
-                                GDL90.trafficCallsignFromLoggedPacket(event.bytes)
-                            )
-
+//                        val sentCallsign =
+//                            Data.normalizeTailNumber(
+//                                GDL90.trafficCallsignFromLoggedPacket(event.bytes)
+//                            )
+//
 //                        Log.d(
 //                            TAG,
 //                            "SENDING TRAFFIC: callsign=$sentCallsign eventIndex=$eventIndex"
@@ -290,23 +323,8 @@ class GDL90ReplayService : Service() {
                         Data.TYPE_UPLINK -> {
                             Data.sentUplinkCount++
 
-//                            Log.d(
-//                                TAG,
-//                                "SENT UPLINK eventIndex=$eventIndex " +
-//                                        "rawLen=${event.bytes.size} sendLen=${bytesToSend.size}"
-//                            )
                         }
                     }
-
-//                    Log.d(
-//                        TAG,
-//                        "Replay eventIndex=$eventIndex " +
-//                                "type=${event.type} " +
-//                                "t=${event.relativeTimeMs} " +
-//                                "currentPoint=${Data.currentPoint} " +
-//                                "traf=${Data.sentTrafficCount}/${Data.totalTrafficCount} " +
-//                                "uplink=${Data.sentUplinkCount}/${Data.totalUplinkCount}"
-//                    )
 
                     eventIndex++
                 }

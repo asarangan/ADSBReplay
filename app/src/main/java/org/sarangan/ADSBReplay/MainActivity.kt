@@ -145,18 +145,16 @@ class MainActivity : AppCompatActivity() {
                             "Run - Starting Foreground Service"
                         )
 
-                        val etFilterTail: EditText = findViewById(R.id.etFilterTail)
+                        val myTailNumber: EditText = findViewById(R.id.myTailNumber)
 
-                        Data.filteredTailNumber =
-                            Data.normalizeTailNumber(etFilterTail.text.toString())
+                        Data.myTailNumber =
+                            Data.normalizeTailNumber(myTailNumber.text.toString())
 
                         ContextCompat.startForegroundService(
                             baseContext,
                             intentService
                         )
-
                     }
-
                 }
 
                 1 -> {

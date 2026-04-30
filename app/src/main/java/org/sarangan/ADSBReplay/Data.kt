@@ -5,7 +5,7 @@ import kotlin.math.PI
 object Data {
 
     // Data.kt
-    @Volatile var filteredTailNumber: String = ""
+    @Volatile var myTailNumber: String = ""
 
     @Volatile var currentPoint = 0
     @Volatile var seekBarPoint = 0
