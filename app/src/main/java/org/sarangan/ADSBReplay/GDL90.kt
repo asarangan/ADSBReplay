@@ -10,6 +10,8 @@ object GDL90 {
     private const val ESC: Int = 0x7D
     private const val ESC_XOR: Int = 0x20
 
+    data class LatLon(val lat: Double, val lon: Double)
+
     const val MSG_HEARTBEAT: Int = 0x00
     const val MSG_OWNSHIP: Int = 0x0A
     const val MSG_OWNSHIP_GEO_ALT: Int = 0x0B
@@ -244,15 +246,10 @@ object GDL90 {
     }
 
     fun frameLoggedPacket(packet: ByteArray): ByteArray? {
-        if (packet.size < 4) return null
+        if (packet.size < 3) return null
 
-        val start = if ((packet.first().toInt() and 0xFF) == FLAG) 1 else 0
-        val end = if ((packet.last().toInt() and 0xFF) == FLAG) packet.size - 1 else packet.size
-
-        if (end <= start) return null
-
-        // Interior is stored as raw, unescaped bytes: message + old CRC
-        val clear = packet.copyOfRange(start, end)
+        // New GPX format: raw unescaped payload + old CRC, no 7E flags.
+        val clear = packet
 
         if (clear.size <= 2) return null
 
@@ -275,50 +272,19 @@ object GDL90 {
             }
         }
 
-        // frame() recomputes CRC and escapes interior 7E/7D correctly.
+        // Recomputes CRC and escapes 7E/7D for wire transmission.
         return frame(payloadOnly)
     }
 
-    private fun extractPayloadWithoutCrc(packet: ByteArray): ByteArray? {
-        if (packet.isEmpty()) return null
+    private fun extractRawPayloadWithoutCrc(packet: ByteArray): ByteArray? {
+        // New GPX format: raw unescaped payload + old CRC, no 7E flags.
+        if (packet.size <= 2) return null
 
-        val start =
-            if ((packet.first().toInt() and 0xFF) == FLAG) 1 else 0
-
-        val end =
-            if ((packet.last().toInt() and 0xFF) == FLAG) packet.size - 1 else packet.size
-
-        if (end <= start) return null
-
-        val body = packet.copyOfRange(start, end)
-
-        val deescaped = ByteArrayOutputStream()
-        var i = 0
-
-        while (i < body.size) {
-            val b = body[i].toInt() and 0xFF
-
-            if (b == ESC) {
-                if (i + 1 >= body.size) return null
-                val next = body[i + 1].toInt() and 0xFF
-                deescaped.write(next xor ESC_XOR)
-                i += 2
-            } else {
-                deescaped.write(b)
-                i++
-            }
-        }
-
-        val clear = deescaped.toByteArray()
-
-        // clear = payload + CRC
-        if (clear.size <= 2) return null
-
-        return clear.copyOfRange(0, clear.size - 2)
+        return packet.copyOfRange(0, packet.size - 2)
     }
 
     fun trafficCallsignFromLoggedPacket(packet: ByteArray): String? {
-        val payload = extractPayloadWithoutCrc(packet) ?: return null
+        val payload = extractRawPayloadWithoutCrc(packet) ?: return null
 
         if (payload.isEmpty()) return null
         if ((payload[0].toInt() and 0xFF) != 0x14) return null
@@ -333,7 +299,7 @@ object GDL90 {
     }
 
     fun trafficAddressFromLoggedPacket(packet: ByteArray): Int? {
-        val payload = extractPayloadWithoutCrc(packet) ?: return null
+        val payload = extractRawPayloadWithoutCrc(packet) ?: return null
 
         if (payload.size < 5) return null
         if ((payload[0].toInt() and 0xFF) != 0x14) return null
@@ -343,5 +309,41 @@ object GDL90 {
                 (payload[4].toInt() and 0xFF)
     }
 
+    fun trafficLatLonFromLoggedPacket(packet: ByteArray): LatLon? {
+        val payload = extractRawPayloadWithoutCrc(packet) ?: return null
+        if (payload.size < 11) return null
+        if ((payload[0].toInt() and 0xFF) != 0x14) return null
+
+        val latRaw =
+            ((payload[5].toInt() and 0xFF) shl 16) or
+                    ((payload[6].toInt() and 0xFF) shl 8) or
+                    (payload[7].toInt() and 0xFF)
+
+        val lonRaw =
+            ((payload[8].toInt() and 0xFF) shl 16) or
+                    ((payload[9].toInt() and 0xFF) shl 8) or
+                    (payload[10].toInt() and 0xFF)
+
+        fun decode24(v: Int): Double {
+            val signed = if ((v and 0x800000) != 0) v or -0x1000000 else v
+            return signed * 180.0 / 8388608.0
+        }
+
+        return LatLon(decode24(latRaw), decode24(lonRaw))
+    }
+
+
+
+    fun distanceNm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val rNm = 3440.065
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a =
+            kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+                    kotlin.math.cos(Math.toRadians(lat1)) *
+                    kotlin.math.cos(Math.toRadians(lat2)) *
+                    kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+        return 2 * rNm * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+    }
 
 }

@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import org.sarangan.ADSBReplay.GDL90.distanceNm
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -57,7 +58,7 @@ class GDL90ReplayService : Service() {
         Thread {
             val loopback = InetAddress.getByName("127.0.0.1")
             val socket = DatagramSocket()
-            val logTraffic = true
+            val logTraffic = false
             val logUplink = false
             val logGPS = false
 
@@ -116,6 +117,8 @@ class GDL90ReplayService : Service() {
 
                     //Traffic logging and skipping logic
                     if (event.type == Data.TYPE_TRAFFIC) {
+
+                        val trafLatLon = GDL90.trafficLatLonFromLoggedPacket(event.bytes)
                         val hexHead = event.bytes.take(8)
                             .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
                         val hexTail = event.bytes.takeLast(8)
@@ -123,7 +126,7 @@ class GDL90ReplayService : Service() {
 
                         val skipAll = false  //Set this true to skip every traffic
 
-                        val skipGroup = setOf(8334, 18600, 48820)
+                        val skipGroup = setOf(0)//setOf(8334, 18600, 48820)
 
                         if (skipAll || (eventIndex in skipGroup)) {
                             if (logTraffic) {
@@ -138,7 +141,6 @@ class GDL90ReplayService : Service() {
                             continue
                         }
 
-                        trafficOrdinal++
 
                         val rawCallsign =
                             GDL90.trafficCallsignFromLoggedPacket(event.bytes)
@@ -189,11 +191,49 @@ class GDL90ReplayService : Service() {
                             continue
                         }
 
+//                        if (trafLatLon != null && Data.currentPoint in Data.trackPoints.indices) {
+//                            val own = Data.trackPoints[Data.currentPoint]
+//
+//                            val distNm = distanceNm(
+//                                own.lat,
+//                                own.lon,
+//                                trafLatLon.lat,
+//                                trafLatLon.lon
+//                            )
+//
+//                            if (distNm < 0.5) {
+//                                val rawCallsign = GDL90.trafficCallsignFromLoggedPacket(event.bytes)
+//                                val normCallsign = Data.normalizeTailNumber(rawCallsign)
+//                                val addr = GDL90.trafficAddressFromLoggedPacket(event.bytes)
+//
+//                                if (logTraffic) {
+//                                    Log.e(
+//                                        TAG,
+//                                        "SUSPECTED OWNSHIP TRAFFIC (BASED ON DISTANCE): " +
+//                                                "distNm=${"%.3f".format(distNm)} " +
+//                                                "raw=$rawCallsign norm=$normCallsign " +
+//                                                "addr=${addr?.let { "%06X".format(it) } ?: "NULL"} " +
+//                                                "eventIndex=$eventIndex"
+//                                    )
+//                                }
+//                                eventIndex++
+//                                continue
+//                            }
+//                        }
+//
+//                        if (addr == 0xAA3637) {
+//                            Log.e(TAG, "AA3637 ENCOUNTERED eventIndex=$eventIndex")
+//                        }
+
+
+                        trafficOrdinal++
+
                         if (logTraffic){
                             Log.d(
                                 TAG,
                                 "Traffic TXSEQ=$seq GPXIDX=$eventIndex TRAFFIC_ORD=$trafficOrdinal " +
                                         "time=${event.relativeTimeMs} rawLen=${event.bytes.size} " +
+                                        "addr=${addr?.let { "%06X".format(it) } ?: "NULL"} " +
                                         "callsign=$trafficCallsign " +
                                         "head=$hexHead tail=$hexTail"
                             )
@@ -302,14 +342,13 @@ class GDL90ReplayService : Service() {
                             Data.sentGeoAltCount++
 
                             // Fully framed packet:
-                            // [0]=0x7E, [1]=0x0B, [2]=alt MSB, [3]=alt LSB, ...
-                            if (event.bytes.size >= 9 &&
-                                (event.bytes[0].toInt() and 0xFF) == 0x7E &&
-                                (event.bytes[1].toInt() and 0xFF) == 0x0B
+                            // [0]=0x0B, [1]=alt MSB, [2]=alt LSB, ...
+                            if (event.bytes.size >= 7 &&
+                                (event.bytes[0].toInt() and 0xFF) == 0x0B
                             ) {
                                 val geoAlt5Ft =
-                                    ((event.bytes[2].toInt() and 0xFF) shl 8) or
-                                            (event.bytes[3].toInt() and 0xFF)
+                                    ((event.bytes[1].toInt() and 0xFF) shl 8) or
+                                            (event.bytes[2].toInt() and 0xFF)
 
                                 Data.currentGeoAltMeters =
                                     (geoAlt5Ft * 5.0) / 3.28084
@@ -397,6 +436,4 @@ class TrackPlayServiceNotification {
         return builder.build()
     }
 }
-
-
 
