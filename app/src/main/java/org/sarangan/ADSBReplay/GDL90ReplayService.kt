@@ -340,8 +340,7 @@ class GDL90ReplayService : Service() {
 
                         Data.TYPE_OWNSHIP_GEO_ALT -> {
                             Data.sentGeoAltCount++
-
-                            // Fully framed packet:
+                            // Logged raw packet, not framed:
                             // [0]=0x0B, [1]=alt MSB, [2]=alt LSB, ...
                             if (event.bytes.size >= 7 &&
                                 (event.bytes[0].toInt() and 0xFF) == 0x0B
