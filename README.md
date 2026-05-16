@@ -4,3 +4,13 @@ This app will read a GPX track file and send out an ADSB signal to replay the sa
 
 The app has been tested with Avare and AvareX, but in theory it should work with any EFB. On Avare, you need to set the GPS source to "Avare Apps Only" to avoid conflict with your internal GPS. On AvareX, the GPS source should be set to "External".
 
+
+
+The aircraft tail number is used to filter out that aircraft from the ADSB traffic report so you don't see your own aircraft always being reported as a collision hazard.
+
+
+
+<img src="screenshot.png" width="300">
+
+
+

@@ -340,9 +340,21 @@ class GDL90ReplayService : Service() {
 
                         Data.TYPE_OWNSHIP_GEO_ALT -> {
                             Data.sentGeoAltCount++
-                            // Logged raw packet, not framed:
-                            // [0]=0x0B, [1]=alt MSB, [2]=alt LSB, ...
-                            if (event.bytes.size >= 7 &&
+
+                            val hexHead = event.bytes.take(8)
+                                .joinToString("") { "%02X".format(it.toInt() and 0xFF) }
+
+                            if (event.bytes.size < 7) {
+                                Log.w(
+                                    TAG,
+                                    "Geo altitude packet shorter than expected payload+CRC: " +
+                                            "len=${event.bytes.size} head=$hexHead"
+                                )
+                            }
+
+                            // Decode for display. Only the first 3 bytes are needed:
+                            // [0]=0x0B, [1]=alt MSB, [2]=alt LSB
+                            if (event.bytes.size >= 3 &&
                                 (event.bytes[0].toInt() and 0xFF) == 0x0B
                             ) {
                                 val geoAlt5Ft =
@@ -351,6 +363,17 @@ class GDL90ReplayService : Service() {
 
                                 Data.currentGeoAltMeters =
                                     (geoAlt5Ft * 5.0) / 3.28084
+
+                                Log.d(
+                                    TAG,
+                                    "Geo altitude decoded: raw5ft=$geoAlt5Ft " +
+                                            "meters=${Data.currentGeoAltMeters} head=$hexHead"
+                                )
+                            } else {
+                                Log.w(
+                                    TAG,
+                                    "Could not decode geo altitude: len=${event.bytes.size} head=$hexHead"
+                                )
                             }
                         }
 
